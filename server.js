@@ -8,10 +8,12 @@ const { Server } = require("socket.io");
 const app = express();
 
 /* ✅ CORS (API + Socket.IO) */
-app.use(cors({
-  origin: "*", // later apna domain set kar dena
-  methods: ["GET", "POST"]
-}));
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST"],
+  })
+);
 
 app.use(express.json());
 
@@ -23,9 +25,10 @@ const noticeRoutes = require("./routes/noticeRoutes");
 app.use("/api/notices", noticeRoutes);
 
 /* ✅ MongoDB */
-mongoose.connect(process.env.MONGO_URI)
+mongoose
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => console.log("❌ Mongo Error:", err));
+  .catch((err) => console.log("❌ Mongo Error:", err));
 
 /* ✅ Root */
 app.get("/", (req, res) => {
@@ -33,7 +36,6 @@ app.get("/", (req, res) => {
 });
 
 /* ======================================
-   IMPORTANT:
    Render pe socket chalane ke liye
    http server banana zaruri hai
 ====================================== */
@@ -42,41 +44,48 @@ const server = http.createServer(app);
 /* ✅ Socket.IO Setup */
 const io = new Server(server, {
   cors: {
-    origin: "*", // later: ["https://nripendra.online"]
-    methods: ["GET", "POST"]
-  }
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
 });
 
-/* Room Users */
-const roomUsers = new Map();
-
+/* ======================================
+   SOCKET LOGIC (FINAL STABLE)
+====================================== */
 io.on("connection", (socket) => {
   console.log("🔌 Socket Connected:", socket.id);
 
-  socket.on("join-room", ({ roomId, role, name }) => {
-    socket.join(roomId);
+  socket.on("join-room", async ({ roomId }) => {
+    try {
+      if (!roomId) return;
 
-    socket.roomId = roomId;
-    socket.role = role;
-    socket.name = name;
+      // room me kitne users already hain (official)
+      const room = io.sockets.adapter.rooms.get(roomId);
+      const usersCount = room ? room.size : 0;
 
-    if (!roomUsers.has(roomId)) roomUsers.set(roomId, []);
-    const users = roomUsers.get(roomId);
+      // max 2
+      if (usersCount >= 2) {
+        socket.emit("room-full");
+        return;
+      }
 
-    users.push({
-      socketId: socket.id,
-      role,
-      name
-    });
+      socket.join(roomId);
+      socket.roomId = roomId;
 
-    roomUsers.set(roomId, users);
+      // updated count
+      const roomAfter = io.sockets.adapter.rooms.get(roomId);
+      const countAfter = roomAfter ? roomAfter.size : 1;
 
-    io.to(roomId).emit("user-joined", { socketId: socket.id, role, name });
+      // joiner ko
+      socket.emit("room-joined", { roomId, usersCount: countAfter });
 
-    io.to(socket.id).emit("room-joined", {
-      roomId,
-      usersCount: users.length
-    });
+      // dusre ko
+      socket.to(roomId).emit("user-joined", { roomId, usersCount: countAfter });
+
+      console.log(`👥 Room ${roomId} users:`, countAfter);
+    } catch (e) {
+      console.log("❌ join-room error:", e);
+    }
   });
 
   /* WebRTC signaling */
@@ -93,23 +102,15 @@ io.on("connection", (socket) => {
   });
 
   socket.on("end-call", ({ roomId }) => {
-    io.to(roomId).emit("call-ended");
+    socket.to(roomId).emit("call-ended");
   });
 
   socket.on("disconnect", () => {
     console.log("❌ Socket Disconnected:", socket.id);
 
-    const roomId = socket.roomId;
-
-    if (roomId && roomUsers.has(roomId)) {
-      const users = roomUsers.get(roomId).filter(u => u.socketId !== socket.id);
-      roomUsers.set(roomId, users);
-
-      io.to(roomId).emit("call-ended");
-
-      if (users.length === 0) {
-        roomUsers.delete(roomId);
-      }
+    // disconnect pe room ke other user ko call ended
+    if (socket.roomId) {
+      socket.to(socket.roomId).emit("call-ended");
     }
   });
 });
