@@ -7,19 +7,26 @@ const { Server } = require("socket.io");
 
 const app = express();
 
-/* ✅ CORS */
+/* ===============================
+   ✅ CORS (API + Socket.IO)
+================================ */
 const allowedOrigins = [
   "https://nripendra.online",
   "https://www.nripendra.online",
+  process.env.FRONTEND_URL,
   process.env.FRONTEND_URL_2,
+  process.env.FRONTEND_URL_3,
 ].filter(Boolean);
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // postman/curl allow
+      // Postman / server-to-server requests me origin undefined hota hai
+      if (!origin) return callback(null, true);
+
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("Not allowed by CORS"));
+
+      return callback(new Error("Not allowed by CORS: " + origin));
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
@@ -28,50 +35,61 @@ app.use(
 
 app.use(express.json());
 
-/* ✅ Routes (Old) */
+/* ===============================
+   ✅ ROUTES (IMPORTANT)
+================================ */
 const resultRoutes = require("./routes/resultRoutes");
 app.use("/api/results", resultRoutes);
 
 const noticeRoutes = require("./routes/noticeRoutes");
 app.use("/api/notices", noticeRoutes);
 
-/* ✅ Routes (NEW Auth + Dashboard + Batch) */
+/* ✅ NEW AUTH ROUTES */
 const authRoutes = require("./routes/authRoutes");
 app.use("/api/auth", authRoutes);
 
+/* ✅ NEW USER ROUTES */
 const userRoutes = require("./routes/userRoutes");
 app.use("/api/users", userRoutes);
 
+/* ✅ NEW BATCH ROUTES */
 const batchRoutes = require("./routes/batchRoutes");
 app.use("/api/batches", batchRoutes);
 
-/* ✅ MongoDB */
+/* ===============================
+   ✅ MongoDB
+================================ */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.log("❌ Mongo Error:", err));
 
-/* ✅ Root */
+/* ===============================
+   ✅ Root
+================================ */
 app.get("/", (req, res) => {
   res.send("SarkariNext Backend is Running 🚀 + Auth + Dashboard + Socket.IO ✅");
 });
 
 /* ======================================
    Render pe socket chalane ke liye
+   http server banana zaruri hai
 ====================================== */
 const server = http.createServer(app);
 
-/* ✅ Socket.IO Setup */
+/* ===============================
+   ✅ Socket.IO Setup
+================================ */
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: allowedOrigins.length ? allowedOrigins : "*",
     methods: ["GET", "POST"],
   },
 });
 
-/* ======================================
-   SOCKET LOGIC
-====================================== */
+/* ===============================
+   SOCKET LOGIC (FINAL STABLE)
+================================ */
 io.on("connection", (socket) => {
   console.log("🔌 Socket Connected:", socket.id);
 
@@ -120,14 +138,15 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("❌ Socket Disconnected:", socket.id);
-    if (socket.roomId) {
-      socket.to(socket.roomId).emit("call-ended");
-    }
+    if (socket.roomId) socket.to(socket.roomId).emit("call-ended");
   });
 });
 
-/* ✅ Start */
+/* ===============================
+   ✅ Start
+================================ */
 const PORT = process.env.PORT || 3000;
+
 server.listen(PORT, () => {
   console.log("🚀 Server running on port:", PORT);
 });
