@@ -8,24 +8,25 @@ const { Server } = require("socket.io");
 const app = express();
 
 /* ===============================
-   ✅ CORS (API + Socket.IO)
+   ✅ Allowed Origins
 ================================ */
 const allowedOrigins = [
   "https://nripendra.online",
   "https://www.nripendra.online",
+  "https://nripendra-online.vercel.app",
   process.env.FRONTEND_URL,
   process.env.FRONTEND_URL_2,
   process.env.FRONTEND_URL_3,
 ].filter(Boolean);
 
+/* ===============================
+   ✅ CORS
+================================ */
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Postman / server-to-server requests me origin undefined hota hai
-      if (!origin) return callback(null, true);
-
+      if (!origin) return callback(null, true); // Postman/Server requests
       if (allowedOrigins.includes(origin)) return callback(null, true);
-
       return callback(new Error("Not allowed by CORS: " + origin));
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
@@ -36,25 +37,27 @@ app.use(
 app.use(express.json());
 
 /* ===============================
-   ✅ ROUTES (IMPORTANT)
+   ✅ ROUTES
 ================================ */
-const resultRoutes = require("./routes/resultRoutes");
-app.use("/api/results", resultRoutes);
+app.get("/", (req, res) => {
+  res.send("SarkariNext Backend is Running 🚀 + Auth + Dashboard + Socket.IO ✅");
+});
 
-const noticeRoutes = require("./routes/noticeRoutes");
-app.use("/api/notices", noticeRoutes);
+app.get("/api", (req, res) => {
+  res.json({ ok: true, message: "API is working" });
+});
 
-/* ✅ NEW AUTH ROUTES */
-const authRoutes = require("./routes/authRoutes");
-app.use("/api/auth", authRoutes);
+app.use("/api/results", require("./routes/resultRoutes"));
+app.use("/api/notices", require("./routes/noticeRoutes"));
 
-/* ✅ NEW USER ROUTES */
-const userRoutes = require("./routes/userRoutes");
-app.use("/api/users", userRoutes);
+/* ✅ AUTH ROUTES */
+app.use("/api/auth", require("./routes/authRoutes"));
 
-/* ✅ NEW BATCH ROUTES */
-const batchRoutes = require("./routes/batchRoutes");
-app.use("/api/batches", batchRoutes);
+/* ✅ USERS ROUTES */
+app.use("/api/users", require("./routes/userRoutes"));
+
+/* ✅ BATCH ROUTES */
+app.use("/api/batches", require("./routes/batchRoutes"));
 
 /* ===============================
    ✅ MongoDB
@@ -65,20 +68,12 @@ mongoose
   .catch((err) => console.log("❌ Mongo Error:", err));
 
 /* ===============================
-   ✅ Root
+   ✅ HTTP Server (Render + Socket)
 ================================ */
-app.get("/", (req, res) => {
-  res.send("SarkariNext Backend is Running 🚀 + Auth + Dashboard + Socket.IO ✅");
-});
-
-/* ======================================
-   Render pe socket chalane ke liye
-   http server banana zaruri hai
-====================================== */
 const server = http.createServer(app);
 
 /* ===============================
-   ✅ Socket.IO Setup
+   ✅ Socket.IO
 ================================ */
 const io = new Server(server, {
   cors: {
@@ -87,9 +82,6 @@ const io = new Server(server, {
   },
 });
 
-/* ===============================
-   SOCKET LOGIC (FINAL STABLE)
-================================ */
 io.on("connection", (socket) => {
   console.log("🔌 Socket Connected:", socket.id);
 
@@ -120,21 +112,13 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("offer", ({ roomId, offer }) => {
-    socket.to(roomId).emit("offer", { offer });
-  });
+  socket.on("offer", ({ roomId, offer }) => socket.to(roomId).emit("offer", { offer }));
+  socket.on("answer", ({ roomId, answer }) => socket.to(roomId).emit("answer", { answer }));
+  socket.on("ice-candidate", ({ roomId, candidate }) =>
+    socket.to(roomId).emit("ice-candidate", { candidate })
+  );
 
-  socket.on("answer", ({ roomId, answer }) => {
-    socket.to(roomId).emit("answer", { answer });
-  });
-
-  socket.on("ice-candidate", ({ roomId, candidate }) => {
-    socket.to(roomId).emit("ice-candidate", { candidate });
-  });
-
-  socket.on("end-call", ({ roomId }) => {
-    socket.to(roomId).emit("call-ended");
-  });
+  socket.on("end-call", ({ roomId }) => socket.to(roomId).emit("call-ended"));
 
   socket.on("disconnect", () => {
     console.log("❌ Socket Disconnected:", socket.id);
@@ -145,7 +129,7 @@ io.on("connection", (socket) => {
 /* ===============================
    ✅ Start
 ================================ */
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 server.listen(PORT, () => {
   console.log("🚀 Server running on port:", PORT);
