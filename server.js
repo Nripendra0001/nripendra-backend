@@ -8,24 +8,20 @@ const { Server } = require("socket.io");
 const app = express();
 
 /* ===============================
-   ✅ Allowed Origins
+   ✅ CORS
 ================================ */
 const allowedOrigins = [
   "https://nripendra.online",
   "https://www.nripendra.online",
-  "https://nripendra-online.vercel.app",
   process.env.FRONTEND_URL,
   process.env.FRONTEND_URL_2,
   process.env.FRONTEND_URL_3,
 ].filter(Boolean);
 
-/* ===============================
-   ✅ CORS
-================================ */
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // Postman/Server requests
+      if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       return callback(new Error("Not allowed by CORS: " + origin));
     },
@@ -47,17 +43,20 @@ app.get("/api", (req, res) => {
   res.json({ ok: true, message: "API is working" });
 });
 
-app.use("/api/results", require("./routes/resultRoutes"));
-app.use("/api/notices", require("./routes/noticeRoutes"));
+const resultRoutes = require("./routes/resultRoutes");
+app.use("/api/results", resultRoutes);
 
-/* ✅ AUTH ROUTES */
-app.use("/api/auth", require("./routes/authRoutes"));
+const noticeRoutes = require("./routes/noticeRoutes");
+app.use("/api/notices", noticeRoutes);
 
-/* ✅ USERS ROUTES */
-app.use("/api/users", require("./routes/userRoutes"));
+const authRoutes = require("./routes/authRoutes");
+app.use("/api/auth", authRoutes);
 
-/* ✅ BATCH ROUTES */
-app.use("/api/batches", require("./routes/batchRoutes"));
+const userRoutes = require("./routes/userRoutes");
+app.use("/api/users", userRoutes);
+
+const batchRoutes = require("./routes/batchRoutes");
+app.use("/api/batches", batchRoutes);
 
 /* ===============================
    ✅ MongoDB
@@ -68,13 +67,10 @@ mongoose
   .catch((err) => console.log("❌ Mongo Error:", err));
 
 /* ===============================
-   ✅ HTTP Server (Render + Socket)
+   ✅ Socket Server
 ================================ */
 const server = http.createServer(app);
 
-/* ===============================
-   ✅ Socket.IO
-================================ */
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins.length ? allowedOrigins : "*",
@@ -105,8 +101,6 @@ io.on("connection", (socket) => {
 
       socket.emit("room-joined", { roomId, usersCount: countAfter });
       socket.to(roomId).emit("user-joined", { roomId, usersCount: countAfter });
-
-      console.log(`👥 Room ${roomId} users:`, countAfter);
     } catch (e) {
       console.log("❌ join-room error:", e);
     }
@@ -121,7 +115,6 @@ io.on("connection", (socket) => {
   socket.on("end-call", ({ roomId }) => socket.to(roomId).emit("call-ended"));
 
   socket.on("disconnect", () => {
-    console.log("❌ Socket Disconnected:", socket.id);
     if (socket.roomId) socket.to(socket.roomId).emit("call-ended");
   });
 });
@@ -129,7 +122,7 @@ io.on("connection", (socket) => {
 /* ===============================
    ✅ Start
 ================================ */
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
   console.log("🚀 Server running on port:", PORT);
