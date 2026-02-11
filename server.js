@@ -198,23 +198,34 @@ app.post("/api/chat/mentor-login", async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    const mentor = await Mentor.findOne({ username });
-    if (!mentor) return res.status(401).json({ ok: false, msg: "Invalid username" });
+    if (!username || !password) {
+      return res.status(400).json({ ok: false, msg: "Username & password required" });
+    }
 
-    const ok = await bcrypt.compare(password, mentor.passwordHash);
-    if (!ok) return res.status(401).json({ ok: false, msg: "Invalid password" });
+    const mentor = await Mentor.findOne({ username });
+
+    if (!mentor) {
+      return res.status(401).json({ ok: false, msg: "Invalid username or password" });
+    }
+
+    const ok = password === mentor.password; // ✅ plain text check (simple)
+
+    if (!ok) {
+      return res.status(401).json({ ok: false, msg: "Invalid username or password" });
+    }
 
     const token = jwt.sign(
-      { mentorId: mentor._id, username: mentor.username },
-      process.env.JWT_SECRET,
+      { id: mentor._id, username: mentor.username },
+      process.env.JWT_SECRET || "sarkarinext_secret",
       { expiresIn: "7d" }
     );
 
-    res.json({ ok: true, msg: "Login success", token });
+    res.json({ ok: true, token });
   } catch (e) {
-    res.status(500).json({ ok: false, msg: "Login error", error: e.message });
+    res.status(500).json({ ok: false, msg: "Mentor login error", error: e.message });
   }
 });
+
 
 /* ===============================
    ✅ Socket Server (Chat Only)
