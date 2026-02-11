@@ -4,6 +4,8 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 
@@ -33,10 +35,10 @@ app.use(
 app.use(express.json());
 
 /* ===============================
-   ✅ ROUTES
+   ✅ ROUTES (Existing)
 ================================ */
 app.get("/", (req, res) => {
-  res.send("SarkariNext Backend is Running 🚀 + Auth + Dashboard + Socket.IO ✅");
+  res.send("SarkariNext Backend is Running 🚀 + Auth + Dashboard + Socket.IO Chat ✅");
 });
 
 app.get("/api", (req, res) => {
@@ -67,7 +69,155 @@ mongoose
   .catch((err) => console.log("❌ Mongo Error:", err));
 
 /* ===============================
-   ✅ Socket Server
+   ✅ CHAT MODELS
+================================ */
+const chatSchema = new mongoose.Schema(
+  {
+    roomId: { type: String, required: true },
+    sender: { type: String, enum: ["user", "mentor"], required: true },
+    senderName: { type: String, default: "" },
+    message: { type: String, required: true },
+  },
+  { timestamps: true }
+);
+
+const Chat = mongoose.model("Chat", chatSchema);
+
+const mentorSchema = new mongoose.Schema(
+  {
+    username: { type: String, unique: true },
+    passwordHash: { type: String },
+  },
+  { timestamps: true }
+);
+
+const Mentor = mongoose.model("Mentor", mentorSchema);
+
+/* ===============================
+   ✅ Mentor Auth Helpers
+================================ */
+function mentorAuth(req, res, next) {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ msg: "No token" });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.mentor = decoded;
+    next();
+  } catch (e) {
+    return res.status(401).json({ msg: "Invalid token" });
+  }
+}
+
+/* ===============================
+   ✅ CHAT APIs
+================================ */
+
+/* Create Room (User side) */
+app.post("/api/chat/create-room", async (req, res) => {
+  try {
+    const { userName } = req.body;
+
+    const roomId = "room_" + Date.now();
+
+    res.json({
+      ok: true,
+      roomId,
+      userName: userName || "Student",
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: "Room create error", error: e.message });
+  }
+});
+
+/* Get messages by room */
+app.get("/api/chat/messages/:roomId", async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const msgs = await Chat.find({ roomId }).sort({ createdAt: 1 });
+    res.json({ ok: true, msgs });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: "Messages fetch error", error: e.message });
+  }
+});
+
+/* Mentor: list rooms */
+app.get("/api/chat/mentor/rooms", mentorAuth, async (req, res) => {
+  try {
+    const rooms = await Chat.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: "$roomId",
+          lastMessage: { $first: "$message" },
+          lastTime: { $first: "$createdAt" },
+          lastSender: { $first: "$sender" },
+        },
+      },
+      { $sort: { lastTime: -1 } },
+    ]);
+
+    res.json({ ok: true, rooms });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: "Rooms fetch error", error: e.message });
+  }
+});
+
+/* ===============================
+   ✅ Mentor Login APIs
+================================ */
+
+/* Create Default Mentor (RUN ONCE) */
+app.get("/api/chat/create-mentor", async (req, res) => {
+  try {
+    const exists = await Mentor.findOne({ username: "mentor" });
+    if (exists) {
+      return res.json({ ok: true, msg: "Mentor already exists" });
+    }
+
+    const passwordHash = await bcrypt.hash("mentor@123", 10);
+
+    await Mentor.create({
+      username: "mentor",
+      passwordHash,
+    });
+
+    res.json({
+      ok: true,
+      msg: "✅ Mentor created",
+      username: "mentor",
+      password: "mentor@123",
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: "Mentor create error", error: e.message });
+  }
+});
+
+/* Mentor Login */
+app.post("/api/chat/mentor-login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    const mentor = await Mentor.findOne({ username });
+    if (!mentor) return res.status(401).json({ ok: false, msg: "Invalid username" });
+
+    const ok = await bcrypt.compare(password, mentor.passwordHash);
+    if (!ok) return res.status(401).json({ ok: false, msg: "Invalid password" });
+
+    const token = jwt.sign(
+      { mentorId: mentor._id, username: mentor.username },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({ ok: true, msg: "Login success", token });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: "Login error", error: e.message });
+  }
+});
+
+/* ===============================
+   ✅ Socket Server (Chat Only)
 ================================ */
 const server = http.createServer(app);
 
@@ -75,55 +225,57 @@ const io = new Server(server, {
   cors: {
     origin: allowedOrigins.length ? allowedOrigins : "*",
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
 io.on("connection", (socket) => {
-  console.log("🔌 Socket Connected:", socket.id);
+  console.log("💬 Socket Connected:", socket.id);
 
-  socket.on("join-room", async ({ roomId }) => {
+  /* Join Room */
+  socket.on("joinRoom", (roomId) => {
     try {
       if (!roomId) return;
-
-      const room = io.sockets.adapter.rooms.get(roomId);
-      const usersCount = room ? room.size : 0;
-
-      if (usersCount >= 2) {
-        socket.emit("room-full");
-        return;
-      }
-
       socket.join(roomId);
-      socket.roomId = roomId;
-
-      const roomAfter = io.sockets.adapter.rooms.get(roomId);
-      const countAfter = roomAfter ? roomAfter.size : 1;
-
-      socket.emit("room-joined", { roomId, usersCount: countAfter });
-      socket.to(roomId).emit("user-joined", { roomId, usersCount: countAfter });
     } catch (e) {
-      console.log("❌ join-room error:", e);
+      console.log("❌ joinRoom error:", e.message);
     }
   });
 
-  socket.on("offer", ({ roomId, offer }) => socket.to(roomId).emit("offer", { offer }));
-  socket.on("answer", ({ roomId, answer }) => socket.to(roomId).emit("answer", { answer }));
-  socket.on("ice-candidate", ({ roomId, candidate }) =>
-    socket.to(roomId).emit("ice-candidate", { candidate })
-  );
+  /* Send Message */
+  socket.on("sendMessage", async (data) => {
+    try {
+      const { roomId, sender, senderName, message } = data;
 
-  socket.on("end-call", ({ roomId }) => socket.to(roomId).emit("call-ended"));
+      if (!roomId || !message) return;
+
+      const saved = await Chat.create({
+        roomId,
+        sender,
+        senderName: senderName || "",
+        message,
+      });
+
+      io.to(roomId).emit("newMessage", saved);
+    } catch (e) {
+      console.log("❌ sendMessage error:", e.message);
+    }
+  });
 
   socket.on("disconnect", () => {
-    if (socket.roomId) socket.to(socket.roomId).emit("call-ended");
+    console.log("🔴 Socket disconnected:", socket.id);
   });
 });
 
+server.on("error", (err) => {
+  console.log("❌ SERVER ERROR:", err);
+});
+
 /* ===============================
-   ✅ Start
+   ✅ START SERVER
 ================================ */
 const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log("🚀 Server running on port:", PORT);
 });
