@@ -85,8 +85,8 @@ const Chat = mongoose.model("Chat", chatSchema);
 
 const mentorSchema = new mongoose.Schema(
   {
-    username: { type: String, unique: true },
-    passwordHash: { type: String },
+    username: { type: String, unique: true, required: true },
+    passwordHash: { type: String, required: true },
   },
   { timestamps: true }
 );
@@ -94,18 +94,18 @@ const mentorSchema = new mongoose.Schema(
 const Mentor = mongoose.model("Mentor", mentorSchema);
 
 /* ===============================
-   ✅ Mentor Auth Helpers
+   ✅ Mentor Auth Middleware
 ================================ */
 function mentorAuth(req, res, next) {
   const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ msg: "No token" });
+  if (!token) return res.status(401).json({ ok: false, msg: "No token" });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "sarkarinext_secret");
     req.mentor = decoded;
     next();
   } catch (e) {
-    return res.status(401).json({ msg: "Invalid token" });
+    return res.status(401).json({ ok: false, msg: "Invalid token" });
   }
 }
 
@@ -193,7 +193,7 @@ app.get("/api/chat/create-mentor", async (req, res) => {
   }
 });
 
-/* Mentor Login */
+/* Mentor Login (FIXED ✅ bcrypt compare) */
 app.post("/api/chat/mentor-login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -208,7 +208,8 @@ app.post("/api/chat/mentor-login", async (req, res) => {
       return res.status(401).json({ ok: false, msg: "Invalid username or password" });
     }
 
-    const ok = password === mentor.password; // ✅ plain text check (simple)
+    // ✅ correct password check
+    const ok = await bcrypt.compare(password, mentor.passwordHash);
 
     if (!ok) {
       return res.status(401).json({ ok: false, msg: "Invalid username or password" });
@@ -225,7 +226,6 @@ app.post("/api/chat/mentor-login", async (req, res) => {
     res.status(500).json({ ok: false, msg: "Mentor login error", error: e.message });
   }
 });
-
 
 /* ===============================
    ✅ Socket Server (Chat Only)
