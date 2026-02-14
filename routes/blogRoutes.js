@@ -1,9 +1,26 @@
 const express = require("express");
 const router = express.Router();
 const Blog = require("../models/Blog");
+const jwt = require("jsonwebtoken");
 
 /* ===============================
-   ✅ GET: All Blogs (Latest First)
+   ✅ Admin Auth (Mentor Token)
+================================ */
+function adminAuth(req, res, next) {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ ok: false, msg: "No token" });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "sarkarinext_secret");
+    req.admin = decoded;
+    next();
+  } catch (e) {
+    return res.status(401).json({ ok: false, msg: "Invalid token" });
+  }
+}
+
+/* ===============================
+   ✅ GET: All Blogs (Public)
 ================================ */
 router.get("/", async (req, res) => {
   try {
@@ -18,7 +35,7 @@ router.get("/", async (req, res) => {
 });
 
 /* ===============================
-   ✅ GET: Single Blog by Slug
+   ✅ GET: Single Blog (Public)
 ================================ */
 router.get("/:slug", async (req, res) => {
   try {
@@ -35,10 +52,9 @@ router.get("/:slug", async (req, res) => {
 });
 
 /* ===============================
-   ✅ POST: Create Blog (TEMP)
-   (Later admin auth laga dena)
+   ✅ POST: Create Blog (Admin)
 ================================ */
-router.post("/", async (req, res) => {
+router.post("/", adminAuth, async (req, res) => {
   try {
     const { slug, title, excerpt, category, date, content } = req.body;
 
@@ -56,8 +72,14 @@ router.post("/", async (req, res) => {
       title,
       excerpt: excerpt || "",
       category: category || "General",
-      date: date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-      content: content || ""
+      date:
+        date ||
+        new Date().toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }),
+      content: content || "",
     });
 
     res.json({ ok: true, msg: "Blog created", blog });
@@ -67,7 +89,51 @@ router.post("/", async (req, res) => {
 });
 
 /* ===============================
-   🔥 POST: Increment View Count
+   ✅ PUT: Update Blog (Admin)
+================================ */
+router.put("/:slug", adminAuth, async (req, res) => {
+  try {
+    const updated = await Blog.findOneAndUpdate(
+      { slug: req.params.slug },
+      {
+        title: req.body.title,
+        excerpt: req.body.excerpt,
+        category: req.body.category,
+        date: req.body.date,
+        content: req.body.content,
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ ok: false, msg: "Blog not found" });
+    }
+
+    res.json({ ok: true, msg: "Blog updated", blog: updated });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: "Update error", error: e.message });
+  }
+});
+
+/* ===============================
+   ✅ DELETE: Delete Blog (Admin)
+================================ */
+router.delete("/:slug", adminAuth, async (req, res) => {
+  try {
+    const deleted = await Blog.findOneAndDelete({ slug: req.params.slug });
+
+    if (!deleted) {
+      return res.status(404).json({ ok: false, msg: "Blog not found" });
+    }
+
+    res.json({ ok: true, msg: "Blog deleted" });
+  } catch (e) {
+    res.status(500).json({ ok: false, msg: "Delete error", error: e.message });
+  }
+});
+
+/* ===============================
+   🔥 POST: Increment View Count (Public)
 ================================ */
 router.post("/:slug/view", async (req, res) => {
   try {
