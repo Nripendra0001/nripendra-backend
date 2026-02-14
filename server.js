@@ -61,6 +61,12 @@ const batchRoutes = require("./routes/batchRoutes");
 app.use("/api/batches", batchRoutes);
 
 /* ===============================
+   ✅ BLOG ROUTES (NEW ✅)
+================================ */
+const blogRoutes = require("./routes/blogRoutes");
+app.use("/api/blogs", blogRoutes);
+
+/* ===============================
    ✅ MongoDB
 ================================ */
 mongoose
